@@ -1,7 +1,8 @@
 import logging
 import sqlite3
-from dotenv import load_dotenv
 import os
+
+from dotenv import load_dotenv
 
 from telegram import (
     Update,
@@ -10,72 +11,53 @@ from telegram import (
 )
 
 from telegram.ext import (
-    Updater,
+    Application,
     CommandHandler,
     MessageHandler,
-    Filters,
-    CallbackContext
+    filters,
+    ContextTypes
 )
 
-# --------------------
+# -----------------------
 # LOAD ENV
-# --------------------
+# -----------------------
 
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
 
-# --------------------
+# -----------------------
 # LOGGING
-# --------------------
+# -----------------------
 
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
 
 logger = logging.getLogger(__name__)
 
-# --------------------
+# -----------------------
 # DATABASE
-# --------------------
+# -----------------------
 
-conn = sqlite3.connect('database.db', check_same_thread=False)
+conn = sqlite3.connect("database.db", check_same_thread=False)
 cursor = conn.cursor()
 
-cursor.execute('''
+cursor.execute("""
 CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY,
     username TEXT,
     full_name TEXT
 )
-''')
+""")
 
 conn.commit()
 
-# --------------------
-# MEMORY FOR REPLY MODE
-# --------------------
-
-reply_targets = {}
-
-# --------------------
-# MENU
-# --------------------
-
-main_menu = ReplyKeyboardMarkup(
-    [
-        [KeyboardButton("📋 Menu")],
-        [KeyboardButton("📞 Contact Admin")],
-        [KeyboardButton("ℹ️ Help")]
-    ],
-    resize_keyboard=True
-)
-
-# --------------------
+# -----------------------
 # SAVE USER
-# --------------------
+# -----------------------
 
 def save_user(user):
     cursor.execute(
@@ -88,11 +70,24 @@ def save_user(user):
     )
     conn.commit()
 
-# --------------------
-# START
-# --------------------
+# -----------------------
+# MENU
+# -----------------------
 
-def start(update: Update, context: CallbackContext):
+main_menu = ReplyKeyboardMarkup(
+    [
+        [KeyboardButton("📋 Menu")],
+        [KeyboardButton("📞 Contact Admin")],
+        [KeyboardButton("ℹ️ Help")]
+    ],
+    resize_keyboard=True
+)
+
+# -----------------------
+# START COMMAND
+# -----------------------
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
 
     save_user(user)
@@ -100,219 +95,249 @@ def start(update: Update, context: CallbackContext):
     text = f"""
 🔥 Welcome {user.first_name}
 
-This is your advanced menu bot.
+This is your advanced Telegram menu bot.
 
 Use the buttons below.
 """
 
-    update.message.reply_text(text, reply_markup=main_menu)
+    await update.message.reply_text(
+        text,
+        reply_markup=main_menu
+    )
 
-# --------------------
+# -----------------------
 # HELP
-# --------------------
+# -----------------------
 
-def help_command(update: Update, context: CallbackContext):
-    update.message.reply_text(
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
         "Use the menu buttons to interact with the bot."
     )
 
-# --------------------
-# MENU BUTTONS
-# --------------------
+# -----------------------
+# ADMIN PANEL
+# -----------------------
 
-def menu_handler(update: Update, context: CallbackContext):
-    text = update.message.text
-    user = update.effective_user
-
-    save_user(user)
-
-    if text == "📋 Menu":
-        update.message.reply_text(
-            "📌 Available Options:\n\n"
-            "1. Contact Admin\n"
-            "2. Get Help\n"
-            "3. Broadcast System\n"
-        )
-
-    elif text == "📞 Contact Admin":
-        update.message.reply_text(
-            "✍️ Send your message now. Admin will reply soon."
-        )
-
-    elif text == "ℹ️ Help":
-        update.message.reply_text(
-            "This bot supports menus, broadcasts and admin replies."
-        )
-
-# --------------------
-# USER MESSAGE -> ADMIN
-# --------------------
-
-def forward_to_admin(update: Update, context: CallbackContext):
-    user = update.effective_user
-    message = update.message.text
-
-    save_user(user)
-
-    # Skip admin commands
-    if message.startswith('/'):
+async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ Unauthorized")
         return
 
-    # Ignore menu buttons
-    if message in ["📋 Menu", "📞 Contact Admin", "ℹ️ Help"]:
-        return
+    text = """
+🛠 Admin Panel
 
-    admin_message = (
-        f"📩 New Message\n\n"
-        f"👤 Name: {user.full_name}\n"
-        f"🆔 ID: {user.id}\n"
-        f"📛 Username: @{user.username}\n\n"
-        f"💬 Message:\n{message}"
-    )
+/users - Total users
+/broadcast MESSAGE - Broadcast to users
+/reply USER_ID MESSAGE - Reply to user
+"""
 
-    keyboard_text = f"/reply {user.id}"
+    await update.message.reply_text(text)
 
-    context.bot.send_message(
-        chat_id=ADMIN_ID,
-        text=admin_message + f"\n\nReply using:\n{keyboard_text}"
-    )
-
-    update.message.reply_text(
-        "✅ Your message was sent to admin."
-    )
-
-# --------------------
-# BROADCAST
-# --------------------
-
-def broadcast(update: Update, context: CallbackContext):
-    user_id = update.effective_user.id
-
-    if user_id != ADMIN_ID:
-        update.message.reply_text("❌ Unauthorized")
-        return
-
-    if len(context.args) == 0:
-        update.message.reply_text(
-            "Usage:\n/broadcast Your message"
-        )
-        return
-
-    message = ' '.join(context.args)
-
-    cursor.execute("SELECT user_id FROM users")
-    users = cursor.fetchall()
-
-    success = 0
-    failed = 0
-
-    for user in users:
-        try:
-            context.bot.send_message(chat_id=user[0], text=message)
-            success += 1
-        except:
-            failed += 1
-
-    update.message.reply_text(
-        f"✅ Broadcast Complete\n\n"
-        f"Success: {success}\n"
-        f"Failed: {failed}"
-    )
-
-# --------------------
-# REPLY SYSTEM
-# --------------------
-
-def reply_command(update: Update, context: CallbackContext):
-    user_id = update.effective_user.id
-
-    if user_id != ADMIN_ID:
-        update.message.reply_text("❌ Unauthorized")
-        return
-
-    if len(context.args) < 2:
-        update.message.reply_text(
-            "Usage:\n/reply USER_ID message"
-        )
-        return
-
-    target_id = int(context.args[0])
-    message = ' '.join(context.args[1:])
-
-    try:
-        context.bot.send_message(
-            chat_id=target_id,
-            text=f"📨 Admin Reply:\n\n{message}"
-        )
-
-        update.message.reply_text("✅ Reply sent")
-
-    except Exception as e:
-        update.message.reply_text(f"❌ Failed: {e}")
-
-# --------------------
+# -----------------------
 # USERS COUNT
-# --------------------
+# -----------------------
 
-def users(update: Update, context: CallbackContext):
-    user_id = update.effective_user.id
-
-    if user_id != ADMIN_ID:
-        update.message.reply_text("❌ Unauthorized")
+async def users(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ Unauthorized")
         return
 
     cursor.execute("SELECT COUNT(*) FROM users")
     total = cursor.fetchone()[0]
 
-    update.message.reply_text(
+    await update.message.reply_text(
         f"👥 Total Users: {total}"
     )
 
-# --------------------
-# ADMIN PANEL
-# --------------------
+# -----------------------
+# BROADCAST
+# -----------------------
 
-def admin(update: Update, context: CallbackContext):
-    user_id = update.effective_user.id
-
-    if user_id != ADMIN_ID:
-        update.message.reply_text("❌ Unauthorized")
+async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ Unauthorized")
         return
 
-    text = """
-🛠 Admin Commands
+    if len(context.args) == 0:
+        await update.message.reply_text(
+            "Usage:\n/broadcast your message"
+        )
+        return
 
-/users - Total users
-/broadcast MESSAGE - Send broadcast
-/reply USER_ID MESSAGE - Reply user
+    message = " ".join(context.args)
+
+    cursor.execute("SELECT user_id FROM users")
+    all_users = cursor.fetchall()
+
+    success = 0
+    failed = 0
+
+    for user in all_users:
+        try:
+            await context.bot.send_message(
+                chat_id=user[0],
+                text=message
+            )
+            success += 1
+
+        except:
+            failed += 1
+
+    await update.message.reply_text(
+        f"""
+✅ Broadcast Complete
+
+Success: {success}
+Failed: {failed}
+"""
+    )
+
+# -----------------------
+# REPLY COMMAND
+# -----------------------
+
+async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ Unauthorized")
+        return
+
+    if len(context.args) < 2:
+        await update.message.reply_text(
+            "Usage:\n/reply USER_ID message"
+        )
+        return
+
+    target_id = int(context.args[0])
+
+    message = " ".join(context.args[1:])
+
+    try:
+        await context.bot.send_message(
+            chat_id=target_id,
+            text=f"📨 Admin Reply:\n\n{message}"
+        )
+
+        await update.message.reply_text("✅ Reply sent")
+
+    except Exception as e:
+        await update.message.reply_text(
+            f"❌ Failed: {e}"
+        )
+
+# -----------------------
+# MENU HANDLER
+# -----------------------
+
+async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+
+    if text == "📋 Menu":
+        await update.message.reply_text(
+            """
+📌 Available Options
+
+1. Contact Admin
+2. Help
+3. Broadcast System
+"""
+        )
+
+    elif text == "📞 Contact Admin":
+        await update.message.reply_text(
+            "✍️ Send your message now."
+        )
+
+    elif text == "ℹ️ Help":
+        await update.message.reply_text(
+            "This bot supports menus, broadcasts and admin replies."
+        )
+
+# -----------------------
+# USER MESSAGE TO ADMIN
+# -----------------------
+
+async def forward_to_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    message = update.message.text
+
+    save_user(user)
+
+    if message.startswith("/"):
+        return
+
+    if message in [
+        "📋 Menu",
+        "📞 Contact Admin",
+        "ℹ️ Help"
+    ]:
+        return
+
+    admin_text = f"""
+📩 New Message
+
+👤 Name: {user.full_name}
+🆔 ID: {user.id}
+📛 Username: @{user.username}
+
+💬 Message:
+{message}
+
+Reply:
+ /reply {user.id} your_message
 """
 
-    update.message.reply_text(text)
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=admin_text
+        )
 
-# --------------------
+        await update.message.reply_text(
+            "✅ Message sent to admin."
+        )
+
+    except Exception as e:
+        await update.message.reply_text(
+            f"❌ Error: {e}"
+        )
+
+# -----------------------
 # MAIN
-# --------------------
+# -----------------------
 
 def main():
-    updater = Updater(BOT_TOKEN, use_context=True)
+    app = Application.builder().token(BOT_TOKEN).build()
 
-    dp = updater.dispatcher
+    # COMMANDS
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("admin", admin))
+    app.add_handler(CommandHandler("users", users))
+    app.add_handler(CommandHandler("broadcast", broadcast))
+    app.add_handler(CommandHandler("reply", reply))
 
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(CommandHandler("help", help_command))
-    dp.add_handler(CommandHandler("broadcast", broadcast))
-    dp.add_handler(CommandHandler("reply", reply_command))
-    dp.add_handler(CommandHandler("users", users))
-    dp.add_handler(CommandHandler("admin", admin))
+    # TEXT HANDLERS
+    app.add_handler(
+        MessageHandler(
+            filters.TEXT & ~filters.COMMAND,
+            menu_handler
+        )
+    )
 
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, menu_handler))
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, forward_to_admin))
+    app.add_handler(
+        MessageHandler(
+            filters.TEXT & ~filters.COMMAND,
+            forward_to_admin
+        )
+    )
 
-    updater.start_polling()
+    print("Bot is running...")
 
-    print("Bot started...")
+    app.run_polling()
 
-    updater.idle()
+# -----------------------
+# START APP
+# -----------------------
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
