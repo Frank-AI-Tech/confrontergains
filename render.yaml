@@ -1,22 +1,16 @@
-
----
-
-## ═══════════════ FILE 5: render.yaml ═══════════════
-
-```yaml
 services:
   - type: web
     name: menu-builder-bot
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn bot:flask_app --bind 0.0.0.0:$PORT
+    startCommand: gunicorn bot:flask_app --bind 0.0.0.0:$PORT --workers 1 --threads 2
     envVars:
       - key: BOT_TOKEN
-        value: YOUR_BOT_TOKEN_HERE
+        sync: false
       - key: ADMIN_ID
-        value: YOUR_TELEGRAM_USER_ID
+        sync: false
       - key: WEBHOOK_URL
-        value: https://your-service-name.onrender.com
+        sync: false
       - key: PYTHON_VERSION
         value: 3.11.0
