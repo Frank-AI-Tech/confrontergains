@@ -1,18 +1,6 @@
 """
-Menu Builder Bot - Full Telegram Bot Script
+Menu Builder Bot - Fixed for Render Deployment
 Features: Custom menus, Broadcast, Two-way Admin Chat, User Management
-Deployable on Render (Webhooks)
-
-Required Environment Variables:
-- BOT_TOKEN: Your Telegram Bot Token from @BotFather
-- ADMIN_ID: Your Telegram User ID (get it from @userinfobot)
-- WEBHOOK_URL: Your Render service URL (e.g., https://your-bot.onrender.com)
-- PORT: Port number (Render sets this automatically, default 10000)
-
-Required packages (requirements.txt):
-python-telegram-bot==20.7
-flask==3.0.0
-gunicorn==21.2.0
 """
 
 import os
@@ -23,13 +11,10 @@ from datetime import datetime
 from threading import Lock
 from flask import Flask, request, jsonify
 
-from telegram import (
-    Update, InlineKeyboardButton, InlineKeyboardMarkup, 
-    ReplyKeyboardMarkup, KeyboardButton, BotCommand, WebAppInfo
-)
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
-    ConversationHandler, ContextTypes, filters
+    ContextTypes, filters
 )
 from telegram.constants import ParseMode
 
@@ -41,29 +26,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Environment Variables
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8952928835:AAHgMEV7Bbma2sEAqYZ_yUS8M3XClmh8O18")
-ADMIN_ID = int(os.environ.get("ADMIN_ID", "157828443"))
+ADMIN_ID = int(os.environ.get("ADMIN_ID", "157828443") or "0")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "https://confrontergains.onrender.com")
-PORT = int(os.environ.get("PORT", 10000))
+PORT = int(os.environ.get("PORT", "10000"))
 
-# File paths for persistent storage
 USERS_FILE = "users.json"
 MENUS_FILE = "menus.json"
 MESSAGES_FILE = "messages.json"
 SETTINGS_FILE = "settings.json"
 
-# Conversation states
-(ADMIN_MENU, BROADCAST_MSG, BROADCAST_CONFIRM, CHAT_REPLY,
- EDIT_MENU_NAME, EDIT_MENU_BUTTONS, EDIT_MENU_RESPONSE,
- ADD_BUTTON_NAME, ADD_BUTTON_RESPONSE, SET_START_MSG,
- ADMIN_REPLY) = range(11)
-
-# ==================== DATA PERSISTENCE ====================
+# ==================== DATA STORE ====================
 
 class DataStore:
-    """Simple JSON-based data store. Replace with PostgreSQL for production."""
-    
     def __init__(self):
         self.lock = Lock()
         self.users = self._load(USERS_FILE, {})
@@ -80,7 +55,7 @@ class DataStore:
                     "menu_services": "🛠 Our Services:\n\n1. Web Development\n2. Bot Development\n3. App Design",
                     "menu_pricing": "💰 Pricing:\n\nBasic: $99/month\nPro: $199/month\nEnterprise: Custom",
                     "menu_contact": "📞 Contact us:\n\n@YourUsername\nEmail: contact@example.com",
-                    "menu_help": "❓ Help:\n\nUse the buttons below to navigate. For support, click 'Chat with Admin'"
+                    "menu_help": "❓ Help:\n\nUse the buttons below to navigate. For support, click Chat with Admin"
                 }
             }
         })
@@ -90,7 +65,7 @@ class DataStore:
             "admin_chat_enabled": True,
             "broadcast_enabled": True
         })
-    
+
     def _load(self, filename, default):
         try:
             if os.path.exists(filename):
@@ -99,7 +74,7 @@ class DataStore:
         except Exception as e:
             logger.error(f"Error loading {filename}: {e}")
         return default
-    
+
     def _save(self, filename, data):
         with self.lock:
             try:
@@ -107,7 +82,7 @@ class DataStore:
                     json.dump(data, f, ensure_ascii=False, indent=2)
             except Exception as e:
                 logger.error(f"Error saving {filename}: {e}")
-    
+
     def add_user(self, user_id, username, first_name, last_name):
         user_id = str(user_id)
         if user_id not in self.users:
@@ -125,31 +100,31 @@ class DataStore:
             return True
         else:
             self.users[user_id]["last_active"] = datetime.now().isoformat()
-            self.users[user_id]["message_count"] += 1
+            self.users[user_id]["message_count"] = self.users[user_id].get("message_count", 0) + 1
             self._save(USERS_FILE, self.users)
             return False
-    
+
     def get_user(self, user_id):
         return self.users.get(str(user_id))
-    
+
     def get_all_users(self):
         return list(self.users.values())
-    
+
     def get_active_users(self):
         return [u for u in self.users.values() if not u.get("blocked", False)]
-    
+
     def block_user(self, user_id):
         user_id = str(user_id)
         if user_id in self.users:
             self.users[user_id]["blocked"] = True
             self._save(USERS_FILE, self.users)
-    
+
     def unblock_user(self, user_id):
         user_id = str(user_id)
         if user_id in self.users:
             self.users[user_id]["blocked"] = False
             self._save(USERS_FILE, self.users)
-    
+
     def save_message(self, from_id, to_id, message_text, message_type="text"):
         msg = {
             "id": len(self.messages) + 1,
@@ -163,20 +138,19 @@ class DataStore:
         self.messages.append(msg)
         self._save(MESSAGES_FILE, self.messages)
         return msg["id"]
-    
+
     def get_unread_messages(self, user_id):
-        return [m for m in self.messages if str(m["to_id"]) == str(user_id) and not m["read"]]
-    
+        return [m for m in self.messages if str(m["to_id"]) == str(user_id) and not m.get("read", False)]
+
     def mark_read(self, message_id):
         for m in self.messages:
             if m["id"] == message_id:
                 m["read"] = True
         self._save(MESSAGES_FILE, self.messages)
 
-# Initialize data store
 db = DataStore()
 
-# ==================== KEYBOARD BUILDERS ====================
+# ==================== KEYBOARDS ====================
 
 def build_menu_keyboard(menu_id="main", is_admin=False):
     menu = db.menus.get(menu_id, db.menus["main"])
@@ -210,12 +184,12 @@ def build_admin_keyboard():
 def build_back_keyboard(callback="admin_panel"):
     return InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Back", callback_data=callback)]])
 
-# ==================== BOT HANDLERS ====================
+# ==================== HANDLERS ====================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     is_new = db.add_user(user.id, user.username, user.first_name, user.last_name)
-    
+
     if user.id == ADMIN_ID:
         await update.message.reply_text(
             f"👑 *Admin Panel*\n\nWelcome, {user.first_name}!\n\n"
@@ -225,17 +199,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=build_admin_keyboard()
         )
         return
-    
+
     welcome_text = db.settings.get("start_message", "👋 Welcome! Use the menu below to navigate.")
     if is_new:
         welcome_text += "\n\n🎉 You are now subscribed to updates!"
-    
+
     await update.message.reply_text(
         welcome_text,
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=build_menu_keyboard()
     )
-    
+
     if is_new and ADMIN_ID:
         try:
             await context.bot.send_message(
@@ -259,7 +233,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "💬 Chat with Admin - Send messages to admin\n\n"
         "*Admin Commands:*\n"
         "/admin - Open admin panel\n"
-        "/broadcast - Send message to all users\n"
         "/stats - Show bot statistics\n"
         "/users - List all users"
     )
@@ -305,18 +278,20 @@ async def users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += f"{status} `{user['id']}` - {name} ({username})\n"
     await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
-# ==================== CALLBACK HANDLERS ====================
+async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.clear()
+    await update.message.reply_text("✅ Cancelled. Use /start to see the menu.")
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     data = query.data
     user_id = update.effective_user.id
-    
+
     if data == "admin_panel":
         await query.edit_message_text("👑 *Admin Panel*", parse_mode=ParseMode.MARKDOWN, reply_markup=build_admin_keyboard())
         return
-    
+
     if data == "admin_broadcast":
         if not db.settings.get("broadcast_enabled", True):
             await query.answer("Broadcast is disabled!", show_alert=True)
@@ -328,7 +303,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         context.user_data["awaiting_broadcast"] = True
         return
-    
+
     if data == "admin_messages":
         unread = db.get_unread_messages(ADMIN_ID)
         if not unread:
@@ -341,7 +316,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text += f"From: {name} (`{msg['from_id']}`)\n📝 {msg['text'][:100]}...\n[Reply](tg://user?id={msg['from_id']})\n\n"
         await query.edit_message_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=build_back_keyboard())
         return
-    
+
     if data == "admin_users":
         users = db.get_all_users()
         text = f"👥 *Total Users: {len(users)}*\n\n"
@@ -350,7 +325,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text += f"• `{user['id']}` - {name}\n"
         await query.edit_message_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=build_back_keyboard())
         return
-    
+
     if data == "admin_menus":
         text = "📝 *Menu Editor*\n\nCurrent menus:\n"
         for menu_id, menu in db.menus.items():
@@ -361,7 +336,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         await query.edit_message_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard))
         return
-    
+
     if data == "admin_settings":
         settings_text = (
             "⚙️ *Bot Settings*\n\n"
@@ -377,7 +352,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         await query.edit_message_text(settings_text, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard))
         return
-    
+
     if data == "admin_stats":
         users = db.get_all_users()
         total = len(users)
@@ -386,21 +361,45 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         stats_text = f"📊 *Statistics*\n\n👥 Total Users: {total}\n🆕 New Today: {new_today}\n📨 Messages: {len(db.messages)}"
         await query.edit_message_text(stats_text, parse_mode=ParseMode.MARKDOWN, reply_markup=build_back_keyboard())
         return
-    
+
     if data == "toggle_chat":
         db.settings["admin_chat_enabled"] = not db.settings.get("admin_chat_enabled", True)
         db._save(SETTINGS_FILE, db.settings)
         await query.answer("Admin chat toggled!")
-        await button_callback(update, context)
+        await query.edit_message_text(
+            "⚙️ *Bot Settings*\n\n"
+            f"Admin Chat: {'✅' if db.settings.get('admin_chat_enabled') else '❌'}\n"
+            f"Broadcast: {'✅' if db.settings.get('broadcast_enabled') else '❌'}\n\n"
+            "Toggle settings below:",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Toggle Admin Chat", callback_data="toggle_chat")],
+                [InlineKeyboardButton("Toggle Broadcast", callback_data="toggle_broadcast")],
+                [InlineKeyboardButton("Set Start Message", callback_data="set_start")],
+                [InlineKeyboardButton("◀️ Back", callback_data="admin_panel")]
+            ])
+        )
         return
-    
+
     if data == "toggle_broadcast":
         db.settings["broadcast_enabled"] = not db.settings.get("broadcast_enabled", True)
         db._save(SETTINGS_FILE, db.settings)
         await query.answer("Broadcast toggled!")
-        await button_callback(update, context)
+        await query.edit_message_text(
+            "⚙️ *Bot Settings*\n\n"
+            f"Admin Chat: {'✅' if db.settings.get('admin_chat_enabled') else '❌'}\n"
+            f"Broadcast: {'✅' if db.settings.get('broadcast_enabled') else '❌'}\n\n"
+            "Toggle settings below:",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Toggle Admin Chat", callback_data="toggle_chat")],
+                [InlineKeyboardButton("Toggle Broadcast", callback_data="toggle_broadcast")],
+                [InlineKeyboardButton("Set Start Message", callback_data="set_start")],
+                [InlineKeyboardButton("◀️ Back", callback_data="admin_panel")]
+            ])
+        )
         return
-    
+
     if data == "set_start":
         await query.edit_message_text(
             "📝 Send me the new start message. Use {first_name} for user's name.\nType /cancel to abort.",
@@ -408,7 +407,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         context.user_data["awaiting_start_msg"] = True
         return
-    
+
     if data == "start_chat":
         if not db.settings.get("admin_chat_enabled", True):
             await query.answer("Chat is currently unavailable.", show_alert=True)
@@ -419,7 +418,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         context.user_data["in_chat"] = True
         return
-    
+
     menu = db.menus.get("main")
     if menu and data in menu.get("responses", {}):
         response_text = menu["responses"][data]
@@ -429,7 +428,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Back to Menu", callback_data="back_to_menu")]])
         )
         return
-    
+
     if data == "back_to_menu":
         await query.edit_message_text(
             db.settings.get("start_message", "👋 Welcome! Use the menu below to navigate."),
@@ -438,13 +437,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-# ==================== MESSAGE HANDLERS ====================
-
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     message = update.message
     db.add_user(user.id, user.username, user.first_name, user.last_name)
-    
+
     if context.user_data.get("awaiting_broadcast") and user.id == ADMIN_ID:
         context.user_data["awaiting_broadcast"] = False
         context.user_data["broadcast_content"] = {
@@ -465,14 +462,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         await message.reply_text(preview_text, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard))
         return
-    
+
     if context.user_data.get("awaiting_start_msg") and user.id == ADMIN_ID:
         context.user_data["awaiting_start_msg"] = False
         db.settings["start_message"] = message.text
         db._save(SETTINGS_FILE, db.settings)
         await message.reply_text("✅ Start message updated!")
         return
-    
+
     if context.user_data.get("in_chat") and user.id != ADMIN_ID:
         msg_id = db.save_message(user.id, ADMIN_ID, message.text or message.caption or "[Media]")
         try:
@@ -500,7 +497,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"Failed to forward message: {e}")
             await message.reply_text("❌ Failed to send message. Please try again later.")
         return
-    
+
     if context.user_data.get("replying_to") and user.id == ADMIN_ID:
         target_id = context.user_data["replying_to"]
         context.user_data["replying_to"] = None
@@ -519,7 +516,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"Failed to reply: {e}")
             await message.reply_text("❌ Failed to send reply. User may have blocked the bot.")
         return
-    
+
     await message.reply_text(
         db.settings.get("start_message", "👋 Welcome! Use the menu below to navigate."),
         parse_mode=ParseMode.MARKDOWN,
@@ -530,12 +527,12 @@ async def handle_broadcast_confirm(update: Update, context: ContextTypes.DEFAULT
     query = update.callback_query
     await query.answer()
     data = query.data
-    
+
     if data == "cancel_broadcast":
         context.user_data["broadcast_content"] = None
         await query.edit_message_text("❌ Broadcast cancelled.")
         return
-    
+
     if data == "confirm_broadcast":
         content = context.user_data.get("broadcast_content", {})
         if not content:
@@ -564,42 +561,32 @@ async def handle_broadcast_confirm(update: Update, context: ContextTypes.DEFAULT
                 failed += 1
                 if "blocked" in str(e).lower():
                     db.block_user(user["id"])
-        await status_msg.edit_text(
-            f"✅ *Broadcast Complete!*\n\n📤 Sent: {sent}\n❌ Failed: {failed}",
-            parse_mode=ParseMode.MARKDOWN
-        )
+        await status_msg.edit_text(f"✅ *Broadcast Complete!*\n\n📤 Sent: {sent}\n❌ Failed: {failed}", parse_mode=ParseMode.MARKDOWN)
         context.user_data["broadcast_content"] = None
 
 async def handle_admin_reply_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     data = query.data
-    
+
     if data.startswith("reply_"):
         target_id = int(data.split("_")[1])
         context.user_data["replying_to"] = target_id
-        await query.edit_message_text(
-            f"✏️ Replying to user `{target_id}`.\nSend your message now. Type /cancel to abort.",
-            parse_mode=ParseMode.MARKDOWN
-        )
+        await query.edit_message_text(f"✏️ Replying to user `{target_id}`.\nSend your message now. Type /cancel to abort.", parse_mode=ParseMode.MARKDOWN)
         return
-    
+
     if data.startswith("block_"):
         target_id = data.split("_")[1]
         db.block_user(target_id)
         await query.edit_message_text(f"🚫 User `{target_id}` has been blocked.", parse_mode=ParseMode.MARKDOWN)
         return
 
-async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data.clear()
-    await update.message.reply_text("✅ Cancelled. Use /start to see the menu.")
-
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"Update {update} caused error {context.error}")
     if update and update.effective_message:
         await update.effective_message.reply_text("❌ An error occurred. Please try again.")
 
-# ==================== FLASK APP & WEBHOOK SETUP ====================
+# ==================== FLASK + WEBHOOK ====================
 
 flask_app = Flask(__name__)
 
@@ -633,7 +620,7 @@ def index():
 def webhook():
     try:
         update = Update.de_json(request.get_json(force=True), application.bot)
-        application.update_queue.put_nowait(update)
+        asyncio.run_coroutine_threadsafe(application.process_update(update), application.update_queue._loop)
         return "OK", 200
     except Exception as e:
         logger.error(f"Webhook error: {e}")
@@ -644,20 +631,22 @@ async def setup_webhook():
     await application.bot.set_webhook(url=webhook_url)
     logger.info(f"Webhook set to: {webhook_url}")
 
-async def remove_webhook():
-    await application.bot.delete_webhook()
-    logger.info("Webhook removed")
-
-# ==================== MAIN ENTRY POINT ====================
+# ==================== MAIN ====================
 
 if __name__ == "__main__":
     import sys
-    
+
     if "--polling" in sys.argv:
         print("Starting in polling mode...")
         application.run_polling()
     else:
         print("Starting in webhook mode...")
-        application.initialize()
-        asyncio.run(setup_webhook())
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        loop.run_until_complete(application.initialize())
+        loop.run_until_complete(application.start())
+        loop.run_until_complete(setup_webhook())
+
         flask_app.run(host="0.0.0.0", port=PORT)
