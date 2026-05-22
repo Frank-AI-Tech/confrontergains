@@ -42,9 +42,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Environment Variables
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
-ADMIN_ID = int(os.environ.get("ADMIN_ID", "0"))
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8952928835:AAHgMEV7Bbma2sEAqYZ_yUS8M3XClmh8O18")
+ADMIN_ID = int(os.environ.get("ADMIN_ID", "157828443"))
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "https://confrontergains.onrender.com")
 PORT = int(os.environ.get("PORT", 10000))
 
 # File paths for persistent storage
